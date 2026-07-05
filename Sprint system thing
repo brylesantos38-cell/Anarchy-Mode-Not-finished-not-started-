@@ -1,0 +1,113 @@
+-- Cleanup old GUI if you re-execute the script
+if game.CoreGui:FindFirstChild("DoorsSprintGui") then
+    game.CoreGui.DoorsSprintGui:Destroy()
+end
+
+local player = game.Players.LocalPlayer
+local char = player.Character or player.CharacterAdded:Wait()
+local hum = char:WaitForChild("Humanoid")
+local runService = game:GetService("RunService")
+
+-- ## GUI Setup ##
+local sg = Instance.new("ScreenGui")
+sg.Name = "DoorsSprintGui"
+sg.Parent = game.CoreGui
+
+-- Sprint Button (Bottom Right, near jump button)
+local sprintBtn = Instance.new("ImageButton")
+sprintBtn.Name = "SprintButton"
+sprintBtn.Size = UDim2.new(0, 75, 0, 75)
+sprintBtn.Position = UDim2.new(1, -160, 1, -160)
+sprintBtn.Image = "rbxassetid://89190879948216"
+sprintBtn.BackgroundColor3 = Color3.fromRGB(128, 128, 128) -- Changed to Gray
+sprintBtn.BorderSizePixel = 0 -- Set to 0 because UICorner breaks standard borders
+sprintBtn.Parent = sg
+
+-- Make the button a circle
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(1, 0) -- 1 makes it a perfect circle
+btnCorner.Parent = sprintBtn
+
+-- Add a circular black border
+local btnStroke = Instance.new("UIStroke")
+btnStroke.Color = Color3.fromRGB(0, 0, 0)
+btnStroke.Thickness = 4
+btnStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+btnStroke.Parent = sprintBtn
+
+-- Stamina Bar Background (Bottom Center, near item selection)
+local barBG = Instance.new("Frame")
+barBG.Name = "StaminaBarBG"
+barBG.Size = UDim2.new(0, 250, 0, 20)
+barBG.Position = UDim2.new(0.5, -125, 1, -140)
+barBG.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+barBG.BorderColor3 = Color3.fromRGB(0, 0, 0)
+barBG.BorderSizePixel = 3
+barBG.Parent = sg
+
+-- Stamina Bar Fill (Dark Yellow)
+local barFill = Instance.new("Frame")
+barFill.Name = "StaminaFill"
+barFill.Size = UDim2.new(1, 0, 1, 0)
+barFill.BackgroundColor3 = Color3.fromRGB(180, 150, 0) -- Kept stamina yellow
+barFill.BorderSizePixel = 0
+barFill.Parent = barBG
+
+-- ## Logic Setup ##
+local maxStamina = 100
+local currentStamina = maxStamina
+local isSprinting = false
+local normalSpeed = hum.WalkSpeed
+local sprintSpeed = 30
+local staminaDrainRate = 0.5
+local staminaRegenRate = 0.3
+
+-- Button Triggers (Hold to Sprint)
+sprintBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if currentStamina > 0 then
+            isSprinting = true
+            hum.WalkSpeed = sprintSpeed
+        end
+    end
+end)
+
+sprintBtn.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isSprinting = false
+        hum.WalkSpeed = normalSpeed
+    end
+end)
+
+-- Failsafe: Stop sprinting if the mouse drags off the button
+sprintBtn.MouseLeave:Connect(function()
+    isSprinting = false
+    hum.WalkSpeed = normalSpeed
+end)
+
+-- Stamina Drain & Update Loop
+runService.RenderStepped:Connect(function()
+    -- Update Character/Humanoid in case you die and respawn
+    if not char or not char.Parent or not hum or not hum.Parent then
+        char = player.Character or player.CharacterAdded:Wait()
+        hum = char:WaitForChild("Humanoid")
+        -- Re-capture normal speed upon respawn just in case
+        normalSpeed = hum.WalkSpeed 
+    end
+
+    -- Handle Sprinting Logic
+    if isSprinting and hum.MoveDirection.Magnitude > 0 then
+        -- Draining stamina while running
+        currentStamina = math.clamp(currentStamina - staminaDrainRate, 0, maxStamina)
+        if currentStamina <= 0 then
+            isSprinting = false
+            hum.WalkSpeed = normalSpeed
+        end
+    else
+        -- Regenerating stamina when walking or standing still
+        currentStamina = math.clamp(currentStamina + staminaRegenRate, 0, maxStamina)
+    end
+
+    -- Update Bar UI Smoothly
+    barFill.Size = UDim2.new(currentStamina / maxStamina, 0, 1, 0)
+end)
