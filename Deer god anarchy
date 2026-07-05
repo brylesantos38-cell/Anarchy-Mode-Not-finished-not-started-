@@ -1,0 +1,609 @@
+game.ReplicatedStorage.GameData.LatestRoom.Changed:Wait()
+
+local MainGame = require(game.Players.LocalPlayer.PlayerGui.MainUI.Initiator.Main_Game)
+MainGame.caption("you're being followed...", true)
+
+---====== Tải Spawner ======---
+local spawner = loadstring(game:HttpGet("https://raw.githubusercontent.com/RegularVynixu/Utilities/main/Doors/Entity%20Spawner/V2/Source.lua"))()
+
+---====== Các Dịch Vụ (Services) ======---
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local Debris = game:GetService("Debris")
+local UserInputService = game:GetService("UserInputService")
+
+---====== Tham Chiếu Người Chơi và Camera ======---
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+local Camera = workspace.CurrentCamera
+
+---====== Biến Trạng Thái (State Variables) ======---
+local entityModel 
+local entityPart 
+local chaseConnection = nil 
+local destroyTimer = nil 
+local MoveActive = true 
+local customSpeed = 30 -- Updated walk speed to 30 as requested
+local activationRange = 45 
+
+local originalTintColor
+local originalContrast
+
+local isJumpscareActive = false
+local cameraConn, inputConn1, inputConn2
+local activeSounds = {}
+local spawnedOverlayGui = nil
+
+---====== Tạo ColorCorrectionEffect nếu chưa có ======---
+local colorCorrection = Lighting:FindFirstChildOfClass("ColorCorrectionEffect")
+if not colorCorrection then
+	colorCorrection = Instance.new("ColorCorrectionEffect")
+	colorCorrection.Name = "MainColorCorrection"
+	colorCorrection.Parent = Lighting
+end
+
+---====== Tạo Thực Thể (Deer God) ======---
+local entity = spawner.Create({
+	Entity = {
+		Name = "Deer god",
+		Asset = "76464107151900",
+		HeightOffset = 0
+	},
+	Lights = {
+		Flicker = { Enabled = true, Duration = 5 },
+		Shatter = true,
+		Repair = false
+	},
+	Earthquake = { Enabled = false },
+	CameraShake = {
+		Enabled = true,
+		Range = 100,
+		Values = {1.5, 20, 0.1, 1}
+	},
+	Movement = {
+		Speed = 30, -- Synchronized baseline speed to 30
+		Delay = 0,
+		Reversed = false
+	},
+	Rebounding = { Enabled = false },
+	Damage = { Enabled = true, Range = 1, Amount = 125 },
+	Crucifixion = { Enabled = true, Range = 40, Resist = false, Break = true },
+	Death = {
+		Type = "Guiding",
+		Hints = {"Uhmmmmm", "why you here", "you die  by deer god?", "HE is crazy"},
+		Cause = ""
+	}
+})
+
+---====== Hàm Jumpscare ======---
+local function executeRealJumpscare()
+	if inputConn1 then inputConn1:Disconnect(); inputConn1 = nil end
+	if inputConn2 then inputConn2:Disconnect(); inputConn2 = nil end
+
+	local jumpscareGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
+	jumpscareGui.Name = "JumpscareGUI"
+	jumpscareGui.IgnoreGuiInset = true
+	jumpscareGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+	local jumpscareImg = Instance.new("ImageLabel", jumpscareGui)
+	jumpscareImg.Size = UDim2.new(1, 0, 1, 0)
+	jumpscareImg.BackgroundTransparency = 1
+	jumpscareImg.ImageTransparency = 1 
+	jumpscareImg.Image = "rbxassetid://11826279208" 
+	jumpscareImg.ZIndex = 10
+
+	local jumpscareSound = Instance.new("Sound", workspace)
+	jumpscareSound.SoundId = "rbxassetid://6567183465" 
+	jumpscareSound.Volume = 3
+	jumpscareSound:Play()
+	activeSounds[jumpscareSound] = true
+
+	TweenService:Create(jumpscareImg, TweenInfo.new(0.1), {ImageTransparency = 0}):Play()
+	task.wait(0.5) 
+
+	colorCorrection.TintColor = Color3.fromRGB(250, 0, 0)
+	colorCorrection.Contrast = 10
+	TweenService:Create(colorCorrection, TweenInfo.new(0.25), {Contrast = 0}):Play()
+	TweenService:Create(colorCorrection, TweenInfo.new(0.5), {TintColor = originalTintColor}):Play() 
+
+	task.wait(1.0) 
+
+	jumpscareImg.ImageTransparency = 1 
+	jumpscareImg.Image = "rbxassetid://12331751893" 
+	jumpscareImg.ZIndex = 12 
+
+	local skullSound = Instance.new("Sound", workspace)
+	skullSound.SoundId = "rbxassetid://18459521002" 
+	skullSound.Volume = 2
+	skullSound:Play()
+	activeSounds[skullSound] = true
+
+	TweenService:Create(jumpscareImg, TweenInfo.new(0.3), {ImageTransparency = 0}):Play() 
+	task.wait(1.5) 
+
+	TweenService:Create(jumpscareImg, TweenInfo.new(0.5), {ImageTransparency = 1}):Play().Completed:Wait() 
+
+	if cameraConn then cameraConn:Disconnect(); cameraConn = nil end
+	Camera.CameraType = Enum.CameraType.Custom
+	isJumpscareActive = false
+	jumpscareGui:Destroy()
+
+	for sound, _ in pairs(activeSounds) do
+		if sound and sound.Playing then
+			sound:Stop()
+		end
+		if sound and sound.Parent then
+			sound:Destroy()
+		end
+	end
+	activeSounds = {}
+
+	local char = LocalPlayer.Character
+	if char then
+		local hum = char:FindFirstChild("Humanoid")
+		if hum then
+			hum.WalkSpeed = 16
+			hum.JumpPower = 50
+			hum.AutoRotate = true
+			hum.PlatformStand = false
+			for _, part in ipairs(char:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.Anchored = false
+				end
+			end
+		end
+	end
+end
+
+local function doJumpscareWithEffect()
+	if isJumpscareActive then return end
+	isJumpscareActive = true
+
+	local char = LocalPlayer.Character
+	if char then
+		local hum = char:FindFirstChild("Humanoid")
+		if hum then
+			hum.WalkSpeed = 0
+			hum.JumpPower = 0
+			hum.AutoRotate = false
+			hum.PlatformStand = true
+			for _, part in ipairs(char:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.Anchored = true
+				end
+			end
+		end
+	end
+
+	Camera.CameraType = Enum.CameraType.Scriptable
+	if cameraConn then cameraConn:Disconnect() end
+	cameraConn = RunService.RenderStepped:Connect(function()
+		if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head") and entityPart and entityModel and entityModel.Parent then
+			Camera.CFrame = CFrame.new(LocalPlayer.Character.Head.Position, entityPart.Position)
+		else
+			if cameraConn then cameraConn:Disconnect() end
+		end
+	end)
+
+	if inputConn1 then inputConn1:Disconnect(); inputConn1 = nil end
+	if inputConn2 then inputConn2:Disconnect(); inputConn2 = nil end
+	inputConn1 = UserInputService.InputBegan:Connect(function() return Enum.ContextActionResult.Sink end)
+	inputConn2 = UserInputService.InputChanged:Connect(function() return Enum.ContextActionResult.Sink end)
+
+	local staticGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
+	staticGui.Name = "StaticGUI"
+	local staticImg = Instance.new("ImageLabel", staticGui)
+	staticImg.Size = UDim2.new(1, 0, 1, 0)
+	staticImg.BackgroundTransparency = 1
+	staticImg.ImageTransparency = 0
+	staticImg.Image = "rbxassetid://1568285513"
+	staticImg.ZIndex = 11
+
+	local staticSound = Instance.new("Sound", workspace)
+	staticSound.SoundId = "rbxassetid://1845110821"
+	staticSound.Volume = 1
+	staticSound.Looped = true
+	staticSound:Play()
+	activeSounds[staticSound] = true
+
+	local currentBrightness = Lighting.Brightness
+	TweenService:Create(Lighting, TweenInfo.new(0.5), {Brightness = -1}):Play()
+
+	task.wait(1.5)
+
+	staticImg.ImageTransparency = 1
+	if staticSound and staticSound.Playing then staticSound:Stop() end
+	staticSound:Destroy()
+	staticGui:Destroy()
+
+	TweenService:Create(Lighting, TweenInfo.new(0.5), {Brightness = currentBrightness}):Play()
+
+	colorCorrection.TintColor = Color3.fromRGB(255, 255, 255)
+	colorCorrection.Contrast = 0
+
+	task.wait(0.5)
+	executeRealJumpscare()
+end
+
+---====== Entity Callbacks ======---
+
+entity:SetCallback("OnSpawned", function()
+	print("Thực thể đã xuất hiện (spawn)")
+	
+	local Lord = Instance.new("Sound")
+	Lord.SoundId = "rbxassetid://4636847934"
+	Lord.Parent = workspace
+	Lord.Volume = 3
+	Lord.PlaybackSpeed = 1
+	Lord:Play()
+	activeSounds[Lord] = true
+
+	entityModel = entity.Model
+	entityModel.Parent = workspace
+
+	if entityModel then
+		entityPart = entityModel:FindFirstChild("RushNew")
+		if not entityPart then
+			entityPart = entityModel.PrimaryPart or entityModel:FindFirstChildOfClass("BasePart")
+			if not entityPart then
+				return
+			end
+		end
+		entityModel.PrimaryPart = entityPart
+		
+		if entityPart:IsA("BasePart") then
+			entityPart.CanCollide = false
+		end
+	end
+
+	coroutine.wrap(function()
+		for i, v in ipairs(entityModel:GetDescendants()) do
+			if v.Name == "RushNew" then
+				pcall(function()
+					if v:FindFirstChild("Breathing") then v.Breathing:Destroy() end
+				end)
+				pcall(function()
+					if v:FindFirstChild("Footsteps") then v.Footsteps:Destroy() end
+				end)
+			end
+		end
+	end)()
+
+	originalTintColor = colorCorrection.TintColor
+	originalContrast = colorCorrection.Contrast
+
+	colorCorrection.TintColor = Color3.fromRGB(255, 255, 255)
+	colorCorrection.Contrast = 0.1
+	TweenService:Create(colorCorrection, TweenInfo.new(2.5), {Contrast = 0}):Play()
+	TweenService:Create(colorCorrection, TweenInfo.new(5), {TintColor = Color3.fromRGB(255, 255, 255)}):Play()
+
+	MoveActive = true
+
+	if chaseConnection then chaseConnection:Disconnect() end
+	chaseConnection = RunService.Heartbeat:Connect(function(dt)
+		if not MoveActive or not entityModel or not entityModel.PrimaryPart or not HumanoidRootPart or not HumanoidRootPart.Parent then return end
+
+		local pos = entityModel.PrimaryPart.Position
+		local target = HumanoidRootPart.Position
+		local distance = (target - pos).Magnitude
+
+		if distance <= activationRange then 
+			local dir = (target - pos).Unit
+			local moveVec = dir * customSpeed * dt
+			local newCFrame = CFrame.new(pos + moveVec, target)
+			entityModel:SetPrimaryPartCFrame(newCFrame)
+		end
+	end)
+
+	task.spawn(function()
+		MainGame.caption("Guiding light: RUN!, RIGHT NOW IM NOT JOKING", true)
+		task.wait(3.5)
+		
+		MainGame.caption("Deer God: Let me see you......you can't run you can't hide it will follow you...", true)
+		task.wait(4.5)
+		
+		local screamSound = Instance.new("Sound")
+		screamSound.SoundId = "rbxassetid://139310882854462"
+		screamSound.Volume = 3
+		screamSound.Parent = workspace
+		screamSound:Play()
+		activeSounds[screamSound] = true
+		Debris:AddItem(screamSound, 6)
+		
+		MainGame.caption("Human: A̷͉̬͊͌͆̅͊̋́̕H̵̡̧̫͓̤̞̜͇̙̱͍̠͖͇͌͑͆͋̆͌̓̈̚͝Ḩ̸̡͕̺̲̬͓͊̒͗̾̂̉͐̎̈́͗͠͝H̵̭̦̩͕̬̩͙̟͕̹̃͆̈́H̸͔͈̬̔̂͌͝H̸̨̪̙̩͔̾̈́͊̿̊̈̓͠Ḧ̶̼̯͕̰̺̱̞͕̲͈̈́͘ͅH̵͕̤͇̠̠͈́̓̕̚͘͜͠͝", true)
+		task.wait(4)
+		
+		local backgroundSnd = Instance.new("Sound")
+		backgroundSnd.SoundId = "rbxassetid://124606578932734"
+		backgroundSnd.Volume = 2.5
+		backgroundSnd.Parent = workspace
+		backgroundSnd:Play()
+		activeSounds[backgroundSnd] = true
+		Debris:AddItem(backgroundSnd, 8)
+		
+		MainGame.caption("Guiding light: Run as fast as you can, it's deer god yes his different just run", true)
+	end)
+
+	-- Updated chase lifetime duration threshold to fall exactly between 20 and 21 seconds
+	if destroyTimer then task.cancel(destroyTimer) end
+	destroyTimer = task.delay(math.random(200, 210) / 10, function()
+		MoveActive = true 
+		task.wait(0.1) 
+		if entityModel and entityModel.PrimaryPart then
+			entityModel:SetPrimaryPartCFrame(entityModel.PrimaryPart.CFrame * CFrame.new(0, -300, 0)) 
+		end
+		task.wait(0) 
+		entity:Despawn() 
+	end)
+
+	local spawnedRushNew = entityModel:FindFirstChild("RushNew")
+	if spawnedRushNew then
+		spawnedRushNew.Touched:Connect(function(hit)
+			local h = hit.Parent and hit.Parent:FindFirstChild("Humanoid")
+			if h and hit:IsDescendantOf(Character) then
+				h:TakeDamage(100)
+				doJumpscareWithEffect()
+				local stats = game:GetService("ReplicatedStorage").GameStats
+				if stats:FindFirstChild("Player_"..LocalPlayer.Name) then
+					stats["Player_"..LocalPlayer.Name].Total.DeathCause.Value = "Deer God"
+				end
+			end
+		end)
+		
+		spawnedOverlayGui = Instance.new("ScreenGui")
+		spawnedOverlayGui.Name = "JumpscareOverlay"
+		spawnedOverlayGui.IgnoreGuiInset = true
+		spawnedOverlayGui.DisplayOrder = 999999
+		spawnedOverlayGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+		local imageLabel = Instance.new("ImageLabel")
+		imageLabel.BackgroundTransparency = 1
+		imageLabel.BorderSizePixel = 0
+		imageLabel.Position = UDim2.new(0, 0, 0, 0)
+		imageLabel.Size = UDim2.new(1, 0, 1, 0)
+		imageLabel.ScaleType = Enum.ScaleType.Stretch
+		imageLabel.ImageTransparency = 0.7
+		imageLabel.Visible = true
+		imageLabel.Parent = spawnedOverlayGui
+
+		local jumpscareImage1 = "rbxassetid://134346506410955"		
+		local jumpscareImage2 = "rbxassetid://7578853379"
+		local jumpscareImage3 = "rbxassetid://103846711769666"
+		local jumpscareImage4 = "rbxassetid://78199392475572"
+
+		local flashDuration = 35
+		local start = tick()
+
+		task.spawn(function()
+			while tick() - start < flashDuration do
+				if not imageLabel or not imageLabel.Parent then break end
+				imageLabel.Image = jumpscareImage1
+				task.wait()
+				imageLabel.Image = jumpscareImage2
+				task.wait()
+				imageLabel.Image = jumpscareImage3
+				task.wait()
+				imageLabel.Image = jumpscareImage4
+				task.wait()
+			end
+			if imageLabel and imageLabel.Parent then imageLabel:Destroy() end
+		end)
+	end
+end)
+
+entity:SetCallback("OnStartMoving", function()
+	print("Thực thể đã bắt đầu di chuyển.")
+end)
+
+entity:SetCallback("OnEnterRoom", function(room, firstTime)
+	print("Thực thể đã vào phòng: ".. room.Name)
+end)
+
+entity:SetCallback("OnLookAt", function(lineOfSight)
+	print("Xử lý tầm nhìn")
+end)
+
+entity:SetCallback("OnRebounding", function(startOfRebound)
+	print("Xử lý phản lực")
+end)
+
+entity:SetCallback("OnDespawning", function()
+	if chaseConnection then
+		chaseConnection:Disconnect()
+		chaseConnection = nil
+	end
+	if destroyTimer then
+		task.cancel(destroyTimer)
+		destroyTimer = nil
+	end
+
+	-- Force clean and turn off running audio elements upon Despawn sequence trigger
+	for sound, _ in pairs(activeSounds) do
+		if sound then
+			pcall(function()
+				if sound.Playing then sound:Stop() end
+				sound:Destroy()
+			end)
+		end
+	end
+	activeSounds = {}
+
+	-- Destroy static overlay instances immediately upon despawn
+	if spawnedOverlayGui then
+		spawnedOverlayGui:Destroy()
+		spawnedOverlayGui = nil
+	end
+	local residualStatic = LocalPlayer.PlayerGui:FindFirstChild("StaticGUI")
+	if residualStatic then residualStatic:Destroy() end
+
+	TweenService:Create(colorCorrection, TweenInfo.new(2.5), {Contrast = originalContrast}):Play()
+	TweenService:Create(colorCorrection, TweenInfo.new(5), {TintColor = originalTintColor}):Play()
+
+	if entityModel then
+		for _, part in ipairs(entityModel:GetDescendants()) do
+			if part:IsA("BasePart") then
+				part.Anchored = false
+			end
+		end
+	end
+end)
+
+entity:SetCallback("OnDespawned", function()
+	local achievementGiver = loadstring(game:HttpGet("https://raw.githubusercontent.com/RegularVynixu/Utilities/main/Doors/Custom%20Achievements/Source.lua"))()
+	achievementGiver({
+		Title = "Last Chance Too Run Away",
+		Desc = "JORUN US RUN NOW!",
+		Reason = "Survive a God...",
+		Image = "rbxassetid://91924400987994"
+	})
+end)
+
+entity:SetCallback("OnDamagePlayer", function(newHealth)
+	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+	if newHealth <= 0 then
+		local screenGui = Instance.new("ScreenGui")
+		screenGui.Parent = playerGui
+		screenGui.Name = "ScreenGui"
+		screenGui.IgnoreGuiInset = true
+
+		local stopEffects = false
+		local doneFading = false
+
+		local killSound = Instance.new("Sound")
+		killSound.Parent = workspace
+		killSound.PlaybackSpeed = 1
+		killSound.SoundId = "rbxassetid://18459521002"
+		killSound.Name = "Dear god death sound chat"
+		killSound.Volume = 10
+		killSound.Looped = true
+
+		Instance.new("FlangeSoundEffect", killSound).Rate = 0.2
+		Instance.new("TremoloSoundEffect", killSound).Frequency = 1
+		Instance.new("PitchShiftSoundEffect", killSound).Octave = 1
+		Instance.new("DistortionSoundEffect", killSound).Level = 0.2
+
+		local background = Instance.new("ImageLabel", screenGui)
+		background.Size = UDim2.new(1, 0, 1, 0)
+		background.Image = "rbxassetid://1712510813"
+		background.ImageTransparency = 0.5
+		background.BackgroundColor3 = Color3.new(0, 0, 0)
+		background.BackgroundTransparency = 0
+
+		local face = Instance.new("ImageLabel", screenGui)
+		face.AnchorPoint = Vector2.new(0.5, 0.5)
+		face.Position = UDim2.new(0.5, 0, 0.589, 0)
+		face.Size = UDim2.new(0, 30, 0, 30)
+		face.Image = "rbxassetid://11395249132"
+		face.BackgroundTransparency = 1
+
+		local text = Instance.new("ImageLabel", screenGui)
+		text.AnchorPoint = Vector2.new(0.5, 0.5)
+		text.Position = UDim2.new(0.5, 0, 0.5, 0)
+		text.Size = UDim2.new(0, 150, 0, 150)
+		text.Image = "rbxassetid://99132041298170"
+		text.BackgroundTransparency = 1
+
+		killSound:Play()
+
+		local startFov = Camera.FieldOfView
+		local zoomFov = 60
+		local zoomDuration = 0.7
+
+		Camera.CameraType = Enum.CameraType.Scriptable
+		TweenService:Create(Camera, TweenInfo.new(zoomDuration), {FieldOfView = zoomFov}):Play()
+
+		TweenService:Create(face, TweenInfo.new(zoomDuration), {
+			Size = UDim2.new(0, 1200, 0, 1200),
+			Position = UDim2.new(0.5, 0, 0.5, 0)
+		}):Play()
+
+		task.spawn(function()
+			while not stopEffects do
+				background.ImageTransparency = 0.3
+				background.BackgroundTransparency = 0
+				task.wait(0.1)
+				background.ImageTransparency = 0
+				background.BackgroundTransparency = 0.3
+				task.wait(0.1)
+			end
+		end)
+
+		task.spawn(function()
+			while not stopEffects do
+				background.Image = "rbxassetid://131073231978514"
+				task.wait(0.0589)
+				background.Image = "rbxassetid://105841646930424"
+				task.wait(0.0589)
+			end
+		end)
+
+		task.spawn(function()
+			while not stopEffects do
+				face.Rotation = 10
+				face.Image = "rbxassetid://17787953801"
+				task.wait(0.0589)
+				face.Rotation = -10
+				task.wait(0.0589)
+			end
+		end)
+
+		task.spawn(function()
+			while not stopEffects do
+				text.Image = "rbxassetid://88490592395124"
+				task.wait(0.0589)
+				text.Image = "rbxassetid://99132041298170"
+				task.wait(0.0589)
+			end
+		end)
+
+		task.spawn(function()
+			while not stopEffects do
+				text.Position = UDim2.new(math.random(), 0, math.random(), 0)
+				task.wait(0.05)
+			end
+		end)
+
+		task.spawn(function()
+			while not stopEffects do
+				text.ImageTransparency = 0
+				task.wait(0.1)
+				text.ImageTransparency = 1
+				task.wait(0.1)
+			end
+		end)
+
+		task.wait(zoomDuration)
+		stopEffects = true
+		killSound:Stop()
+
+		task.spawn(function()
+			while not doneFading do
+				face.ImageTransparency = math.min(face.ImageTransparency + 0.1, 1)
+				text.ImageTransparency = math.min(text.ImageTransparency + 0.1, 1)
+				background.ImageTransparency = math.min(background.ImageTransparency + 0.1, 1)
+				background.BackgroundTransparency = math.min(background.BackgroundTransparency + 0.1, 1)
+				if face.ImageTransparency >= 1 then
+					doneFading = true
+				end
+				task.wait(0.05)
+			end
+			screenGui:Destroy()
+		end)
+
+		task.wait(0.7)
+		Camera.CameraType = Enum.CameraType.Custom
+		Camera.FieldOfView = startFov
+	end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+	Character = char
+	HumanoidRootPart = char:WaitForChild("HumanoidRootPart")
+end)
+
+---====== Chạy Thực Thể ======---
+entity:Run()
