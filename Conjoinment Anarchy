@@ -1,0 +1,342 @@
+---====== Initialize ======---
+
+local gameData = game.ReplicatedStorage:WaitForChild("GameData")
+local latestRoom = gameData:WaitForChild("LatestRoom")
+
+-- [OPTIMIZATION] Load the spawner ONCE here, instead of every time the entity spawns.
+local Spawner = loadstring(game:HttpGet("https://raw.githubusercontent.com/RegularVynixu/DOORS-Entity-Spawner-V2/main/init.luau"))()
+
+---====== Helper Functions ======---
+
+local function GitAud(soundgit, filename)
+    local FileName = filename .. ".mp3"
+    
+    if isfile(FileName) then
+        return (getcustomasset or getsynasset)(FileName)
+    end
+    
+    local success, result = pcall(function()
+        return game:HttpGet(soundgit)
+    end)
+    
+    if success and result then
+        writefile(FileName, result)
+        return (getcustomasset or getsynasset)(FileName)
+    else
+        warn("Failed to download audio: " .. tostring(filename))
+        return ""
+    end
+end
+
+local function CustomGitSound(soundlink, vol, filename)
+    local assetId = GitAud(soundlink, filename)
+    if assetId ~= "" then
+        local Sound = Instance.new("Sound")
+        Sound.SoundId = assetId
+        Sound.Parent = workspace
+        Sound.Volume = vol or 3
+        Sound:Play()
+        game.Debris:AddItem(Sound, 10) 
+    end
+end
+
+-- Red Warning Light System Manipulation
+local function light(tim, color0, color1)
+	local tweenservice = game:GetService("TweenService")
+	local info = TweenInfo.new(tim, Enum.EasingStyle.Linear)
+	for _, lightInstance in pairs(game.Workspace.CurrentRooms:GetDescendants()) do
+		if lightInstance:IsA("Light") or lightInstance:IsA("SurfaceLight") or lightInstance:IsA("SpotLight") then
+			local target = {Color = color1}
+			local anim = tweenservice:Create(lightInstance, info, target)
+			anim:Play()
+		end
+		if lightInstance:IsA("MeshPart") and lightInstance.Material == Enum.Material.Neon and lightInstance.Name ~= "Skybox" then
+			local target1 = {Color = color0}
+			local anim2 = tweenservice:Create(lightInstance, info, target1)
+			anim2:Play()
+		end
+	end
+end
+
+---====== Core Functions ======---
+
+local function SpawnEntity()
+    print("Spawning Conjoinment!")
+    local TweenService = game:GetService("TweenService")
+
+    ---====== Intro Warning ======---
+    local RedColorWarn = Instance.new("ColorCorrectionEffect", game.Lighting) 
+    game.Debris:AddItem(RedColorWarn, 12) 
+    RedColorWarn.Name = "ConjoinmentWarn" 
+    RedColorWarn.TintColor = Color3.fromRGB(255, 0, 0) 
+    RedColorWarn.Saturation = -0.4 
+    RedColorWarn.Contrast = 0.45 
+
+    TweenService:Create(RedColorWarn, TweenInfo.new(4), {
+        TintColor = Color3.fromRGB(255, 255, 255),
+        Saturation = 0, 
+        Contrast = 0
+    }):Play()
+
+    -- Camera Shaker Engine Run
+    local CameraShakerModule = game.ReplicatedStorage:FindFirstChild("CameraShaker", true)
+    if CameraShakerModule then
+        local CameraShaker = require(CameraShakerModule)
+        local camera = game.Workspace.CurrentCamera
+        local camShake = CameraShaker.new(Enum.RenderPriority.Camera.Value, function(shakeCf)
+            camera.CFrame = camera.CFrame * shakeCf
+        end)
+        camShake:Start()
+        camShake:ShakeOnce(14, 5, 0.1, 4, 1.5, 0.5)
+    end
+
+    -- Deep Distorted Warning Sound Generation
+    local WarnSound = Instance.new("Sound")
+    WarnSound.SoundId = "rbxassetid://139310882854462"
+    WarnSound.Volume = 4.5
+    WarnSound.PlaybackSpeed = 0.55 
+    WarnSound.Parent = workspace
+    
+    local warnDistort = Instance.new("DistortionSoundEffect")
+    warnDistort.Level = 0.8
+    warnDistort.Parent = WarnSound
+    
+    WarnSound:Play()
+    game.Debris:AddItem(WarnSound, 8)
+    task.wait(1.5)
+
+    ---====== Create entity ======---
+    local entity = Spawner:Create({
+        Entity = {
+            Name = "Conjoinment",
+            Asset = "rbxassetid://11994083035", 
+            HeightOffset = 0
+        },
+        Lights = {
+            Flicker = {
+                Enabled = true,
+                Duration = 2
+            },
+            Shatter = true,
+            Repair = false
+        },
+        Earthquake = {
+            Enabled = true
+        },
+        CameraShake = {
+            Enabled = true,
+            Range = 110, 
+            Values = {6, 28, 0.1, 1} 
+        },
+        Movement = {
+            Speed = 290, -- [MODIFIED] Speed increased to 290
+            Delay = 2, 
+            Reversed = true
+        },
+        Rebounding = {
+            Enabled = true,
+            Type = "Ambush", 
+            Min = 20, 
+            Max = 29,
+            Delay = 2.5
+        },
+        Damage = {
+            Enabled = true,
+            Range = 45,
+            Amount = 150
+        },
+        Crucifixion = {
+            Enabled = true,
+            Range = 40,
+            Resist = false,
+            Break = true
+        },
+        Death = {
+            Type = "Guiding", 
+            Hints = {
+                "You died to Conjoinment...", 
+                "It twists back and forth through rooms rapidly!",
+                "Find structural cover instantly when the rooms warp red."
+            },
+            Cause = "Conjoinment"
+        }
+    })
+
+    ---====== Callbacks ======---
+    entity:SetCallback("OnSpawned", function()
+        local warningRed = Color3.fromRGB(255, 0, 0)
+        light(0.4, warningRed, warningRed)
+
+        -- Inject custom smoke into conjoinment model
+        task.spawn(function()
+            local model = workspace:WaitForChild("Conjoinment", 5)
+            if model then
+                local primaryPart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+                if primaryPart then
+                    local smoke = Instance.new("Smoke")
+                    smoke.Name = "ConjoinmentSmoke"
+                    smoke.Color = Color3.fromRGB(180, 10, 10)
+                    smoke.Opacity = 0.75
+                    smoke.RiseSpeed = 3
+                    smoke.Size = 15
+                    smoke.Parent = primaryPart
+                end
+            end
+        end)
+    end)
+
+    entity:SetCallback("OnStartMoving", function()
+        task.spawn(function()
+            local model = workspace:FindFirstChild("Conjoinment")
+            local localPlayer = game.Players.LocalPlayer
+            
+            if model and localPlayer and localPlayer.Character then
+                local primaryPart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+                if primaryPart then
+                    local closeSound = Instance.new("Sound")
+                    closeSound.Name = "ProximityCloseSound"
+                    closeSound.SoundId = "rbxassetid://116456025793787"
+                    closeSound.Volume = 0 
+                    closeSound.PlaybackSpeed = 0.65 
+                    closeSound.Looped = true
+                    closeSound.RollOffMode = Enum.RollOffMode.Linear
+                    closeSound.RollOffMinDistance = 10 
+                    closeSound.RollOffMaxDistance = 120 
+                    closeSound.Parent = primaryPart
+                    
+                    local closeDistortion = Instance.new("DistortionSoundEffect")
+                    closeDistortion.Level = 0.75
+                    closeDistortion.Parent = closeSound
+                    closeSound:Play()
+                    
+                    task.spawn(function()
+                        while model and model.Parent do
+                            if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                                local distance = (primaryPart.Position - localPlayer.Character.HumanoidRootPart.Position).Magnitude
+                                if distance <= 120 then
+                                    closeSound.Volume = math.clamp((120 - distance) / 15, 0, 8)
+                                else
+                                    closeSound.Volume = 0
+                                end
+                            end
+                            task.wait(0.05) 
+                        end
+                    end)
+                end
+            end
+        end)
+
+        -- Main loop moving sound file execution
+        task.spawn(function()
+            local assetId = GitAud("https://raw.githubusercontent.com/brylesantos38-cell/Conjoinment-/main/Record_2026-07-04-20-57-39.mp3", "ConjoinmentMoving")
+            if assetId ~= "" then
+                local ConjoinmentMov = Instance.new("Sound")
+                ConjoinmentMov.SoundId = assetId
+                ConjoinmentMov.Parent = workspace
+                ConjoinmentMov.Volume = 3
+                ConjoinmentMov.PlaybackSpeed = 1 
+                ConjoinmentMov.Looped = true 
+                
+                local moveDistortion = Instance.new("DistortionSoundEffect")
+                moveDistortion.Level = 0.75
+                moveDistortion.Parent = ConjoinmentMov
+
+                ConjoinmentMov:Play()
+                game.Debris:AddItem(ConjoinmentMov, 60)
+            end
+        end)
+    end)
+
+    entity:SetCallback("OnDamagePlayer", function(newHealth: number)
+        if newHealth <= 0 then
+            local JumpscareGui = Instance.new("ScreenGui")
+            local Background = Instance.new("Frame")
+            local Face = Instance.new("ImageLabel")
+
+            JumpscareGui.Name = "JumpscareGui"
+            JumpscareGui.IgnoreGuiInset = true
+            JumpscareGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+            JumpscareGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+
+            Background.Name = "Background"
+            Background.BackgroundColor3 = Color3.fromRGB(3, 25, 99)
+            Background.BorderSizePixel = 0
+            Background.Size = UDim2.new(1, 0, 1, 0)
+            Background.ZIndex = 999
+
+            Face.Name = "Face"
+            Face.AnchorPoint = Vector2.new(0.5, 0.5)
+            Face.BackgroundTransparency = 1
+            Face.Position = UDim2.new(0.5, 0, 0.5, 0)
+            Face.ResampleMode = Enum.ResamplerMode.Pixelated
+            Face.Size = UDim2.new(0, 150, 0, 150)
+            Face.Image = "rbxassetid://137927370605265"
+
+            Background.Parent = JumpscareGui
+            Face.Parent = Background
+
+            local scare = Instance.new("Sound")
+            scare.Parent = JumpscareGui
+            scare.Name = "ScreamConjoinment"
+            scare.SoundId = GitAud("https://raw.githubusercontent.com/brylesantos38-cell/Conjoinment-/main/Conjoinment%20Jumpscare.mp3", "ConjoinmentScream")
+            scare.PlaybackSpeed = 3
+            scare.Volume = 3
+
+            local shift = Instance.new("PitchShiftSoundEffect")
+            shift.Octave = 0.5
+            shift.Parent = scare
+
+            local distort = Instance.new("DistortionSoundEffect")
+            distort.Parent = scare
+            distort.Level = 0.75
+
+            local eq = Instance.new("EqualizerSoundEffect")
+            eq.HighGain = 10
+            eq.MidGain = 10
+            eq.LowGain = 3.7
+            eq.Parent = scare
+            
+            -- [MODIFIED] Chaotic rotating, moving, and twisting animation loop
+            local currentRotation = 0
+            task.spawn(function()
+                while JumpscareGui.Parent do
+                    -- Violent structural frame background color strobing
+                    Background.BackgroundColor3 = Color3.fromRGB(math.random(0, 50), math.random(0, 30), math.random(100, 255))
+                    task.wait(math.random(2, 15) / 1000) 
+                    Background.BackgroundColor3 = Color3.fromRGB(255, 0, 0) 
+                    task.wait(math.random(2, 15) / 1000)
+                    Background.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+                    task.wait(math.random(2, 10) / 1000)
+                    
+                    -- Extreme spinning and wide all-around movement chaos
+                    currentRotation = (currentRotation + math.random(35, 90)) % 360
+                    Face.Rotation = currentRotation
+                    
+                    local screenPosChance = math.random(1, 3)
+                    if screenPosChance == 1 then
+                        -- Huge random offsets across the screen area
+                        Face.Position = UDim2.new(
+                            math.random(2, 8) / 10, math.random(-200, 200),
+                            math.random(2, 8) / 10, math.random(-200, 200)
+                        )
+                    else
+                        -- Violent close-range shaking center point offset
+                        Face.Position = UDim2.new(0.5, math.random(-350, 350), 0.5, math.random(-350, 350))
+                    end
+                end
+            end)
+
+            -- Fast elastic sizing scaling entry
+            game.TweenService:Create(Face, TweenInfo.new(0.2, Enum.EasingStyle.Elastic), {Size = UDim2.new(0, 2800, 0, 1800), ImageTransparency = 0}):Play()
+            scare:Play()
+            task.wait(0.8)
+            JumpscareGui:Destroy()
+        end
+    end)
+
+    ---====== Run entity ======---
+    entity:Run()
+end
+
+---====== Start Chain ======---
+SpawnEntity()
