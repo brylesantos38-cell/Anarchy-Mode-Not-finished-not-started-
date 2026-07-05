@@ -1,0 +1,317 @@
+---====== Initialize ======---
+
+local gameData = game.ReplicatedStorage:WaitForChild("GameData")
+local latestRoom = gameData:WaitForChild("LatestRoom")
+local ContentProvider = game:GetService("ContentProvider")
+
+local spawnCount = 0
+local maxSpawn = math.random(8, 9)
+local activeMovingSound = nil -- Track the moving sound across callbacks
+
+-- [OPTIMIZATION] Load the spawner ONCE here, instead of every time the entity spawns.
+local Spawner = loadstring(game:HttpGet("https://raw.githubusercontent.com/RegularVynixu/DOORS-Entity-Spawner-V2/main/init.luau"))()
+
+---====== Asset Preloading (Lag Fix) ======---
+task.spawn(function()
+    -- Create temporary instances to force-preload heavy assets into memory early
+    local tempModel = Instance.new("Model")
+    tempModel.Name = "Preload_Rebound"
+    
+    local targetMesh = Instance.new("SpecialMesh")
+    targetMesh.MeshId = "rbxassetid://18445506261"
+    targetMesh.Parent = tempModel
+    
+    local tempSound = Instance.new("Sound")
+    tempSound.SoundId = "rbxassetid://14093035297"
+    tempSound.Parent = tempModel
+
+    pcall(function()
+        ContentProvider:PreloadAsync({tempModel})
+    end)
+    
+    tempModel:Destroy()
+    print("Rebound assets successfully cached. Smooth spawning ready.")
+end)
+
+---====== Helper Functions ======---
+
+local function GitAud(soundgit, filename)
+    local FileName = filename .. ".mp3"
+    
+    -- [OPTIMIZATION] Check if file already exists to prevent redundant downloading/writing
+    if isfile(FileName) then
+        return (getcustomasset or getsynasset)(FileName)
+    end
+    
+    local success, result = pcall(function()
+        return game:HttpGet(soundgit)
+    end)
+    
+    if success and result then
+        writefile(FileName, result)
+        return (getcustomasset or getsynasset)(FileName)
+    else
+        warn("Failed to download audio: " .. tostring(filename))
+        return ""
+    end
+end
+
+local function CustomGitSound(soundlink, vol, filename)
+    local assetId = GitAud(soundlink, filename)
+    if assetId ~= "" then
+        local Sound = Instance.new("Sound")
+        Sound.SoundId = assetId
+        Sound.Parent = workspace
+        Sound.Volume = vol or 3
+        Sound:Play()
+        -- Auto cleanup sound object after playing
+        game.Debris:AddItem(Sound, 10) 
+    end
+end
+
+---====== Core Functions ======---
+
+local function SpawnEntity()
+    spawnCount = spawnCount + 1
+    print("Spawning Rebound! Current spawn count: " .. spawnCount .. " of " .. maxSpawn)
+
+    local TweenService = game:GetService("TweenService")
+
+    ---====== Intro Warning (First Spawn Only) ======---
+    if spawnCount == 1 then
+        local Reboundcolor = Instance.new("ColorCorrectionEffect", game.Lighting) 
+        game.Debris:AddItem(Reboundcolor, 24) 
+        Reboundcolor.Name = "Warn" 
+        Reboundcolor.TintColor = Color3.fromRGB(65, 138, 255) 
+        Reboundcolor.Saturation = -0.7 
+        Reboundcolor.Contrast = 0.2 
+
+        TweenService:Create(Reboundcolor, TweenInfo.new(15), {
+            TintColor = Color3.fromRGB(255, 255, 255),
+            Saturation = 0, 
+            Contrast = 0
+        }):Play()
+
+        -- Dynamically find CameraShaker to prevent script crash
+        local CameraShakerModule = game.ReplicatedStorage:FindFirstChild("CameraShaker", true)
+        if CameraShakerModule then
+            local CameraShaker = require(CameraShakerModule)
+            local camera = game.Workspace.CurrentCamera
+            local camShake = CameraShaker.new(Enum.RenderPriority.Camera.Value, function(shakeCf)
+                camera.CFrame = camera.CFrame * shakeCf
+            end)
+            camShake:Start()
+            camShake:ShakeOnce(10, 3, 0.1, 6, 2, 0.5)
+        else
+            warn("CameraShaker module not found, skipping shake effect to prevent crash.")
+        end
+
+        -- Swapped out old warning sound with the new asset ID provided
+        local Sound = Instance.new("Sound")
+        Sound.SoundId = "rbxassetid://14093035297"
+        Sound.Parent = workspace
+        Sound.Volume = 3
+        Sound:Play()
+        game.Debris:AddItem(Sound, 10)
+
+        task.wait(2)
+    end
+
+    ---====== Create entity ======---
+    local entity = Spawner:Create({
+        Entity = {
+            Name = "Rebound",
+            Asset = "rbxassetid://13976099752", 
+            HeightOffset = 0
+        },
+        Lights = {
+            Flicker = {
+                Enabled = false,
+                Duration = 1
+            },
+            Shatter = false,
+            Repair = false
+        },
+        Earthquake = {
+            Enabled = false
+        },
+        -- Camera shake triggers when Rebound gets close to closets/players
+        CameraShake = {
+            Enabled = true,
+            Range = 100, 
+            Values = {5, 25, 0.1, 1} 
+        },
+        Movement = {
+            Speed = 80,
+            Delay = (spawnCount == 1 and 2 or 5), 
+            Reversed = true
+        },
+        Rebounding = {
+            Enabled = false,
+            Type = "Ambush", 
+            Min = 1,
+            Max = 1,
+            Delay = 3
+        },
+        Damage = {
+            Enabled = true,
+            Range = 40,
+            Amount = 125
+        },
+        Crucifixion = {
+            Enabled = false,
+            Range = 40,
+            Resist = false,
+            Break = true
+        },
+        Death = {
+            Type = "Guiding", 
+            Hints = {
+                "You died to who you call Rebound...", 
+                "He makes his presence known and keeps coming back...", 
+                "Hide when this happens!",
+                "YOU JUST HAVE A SKILL ISSUE"
+            },
+            Cause = "Rebound"
+        }
+    })
+
+    ---====== Debug entity / Callbacks ======---
+    entity:SetCallback("OnSpawned", function()
+        print("Entity has spawned:")
+        
+        task.spawn(function()
+            if spawnCount > 1 then
+                -- Swapped link to your new Spawn 2 audio file matching the requested path update
+                local spawn2AssetId = GitAud("https://raw.githubusercontent.com/brylesantos38-cell/Reboundendless/main/Record_2026-07-05-12-26-40.mp3", "ReboundSpawn2Warning")
+                if spawn2AssetId ~= "" then
+                    local Spawn2Sound = Instance.new("Sound")
+                    Spawn2Sound.SoundId = spawn2AssetId
+                    Spawn2Sound.Parent = workspace
+                    Spawn2Sound.Volume = 3
+                    Spawn2Sound:Play()
+                    game.Debris:AddItem(Spawn2Sound, 10)
+                end
+            end
+        end)
+    end)
+
+    entity:SetCallback("OnStartMoving", function()
+        print("Rebound has started moving:")
+        
+        -- [PROXIMITY CLOSE AUDIO SYSTEM]
+        task.spawn(function()
+            local model = workspace:FindFirstChild("Rebound")
+            local localPlayer = game.Players.LocalPlayer
+            
+            if model and model:IsA("Model") and localPlayer and localPlayer.Character then
+                local primaryPart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+                if primaryPart then
+                    -- Attach 3D Proximity audio straight to the moving entity physics part
+                    local closeSound = Instance.new("Sound")
+                    closeSound.Name = "ProximityCloseSound"
+                    closeSound.SoundId = "rbxassetid://116456025793787"
+                    closeSound.Volume = 0 
+                    closeSound.PlaybackSpeed = 0.65 
+                    closeSound.Looped = true
+                    closeSound.RollOffMode = Enum.RollOffMode.Linear
+                    closeSound.RollOffMinDistance = 2  
+                    closeSound.RollOffMaxDistance = 20 
+                    closeSound.Parent = primaryPart
+                    
+                    -- [FILTER] External sound distortion to make close audio aggressive
+                    local closeDistortion = Instance.new("DistortionSoundEffect")
+                    closeDistortion.Level = 0.75
+                    closeDistortion.Parent = closeSound
+
+                    closeSound:Play()
+                    
+                    -- Dynamic update tracking frame loop
+                    task.spawn(function()
+                        while model and model.Parent do
+                            if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                                local distance = (primaryPart.Position - localPlayer.Character.HumanoidRootPart.Position).Magnitude
+                                
+                                -- Tracks tight spacing to only unmute sound when passing directly through player room space
+                                if distance <= 20 then
+                                    local calculatedVolume = math.clamp((20 - distance) / 2.5, 0, 7)
+                                    closeSound.Volume = calculatedVolume
+                                else
+                                    closeSound.Volume = 0
+                                end
+                            end
+                            task.wait(0.01) -- Faster execution tick tracking for high precision checks
+                        end
+                    end)
+                end
+            end
+        end)
+
+        task.spawn(function()
+            -- Swapped old asset track with your new raw Github endpoint link, Looped is set to false because track is long
+            local assetId = GitAud("https://raw.githubusercontent.com/brylesantos38-cell/Reboundendless/main/ReboundEndless.mp3", "ReboundMovingEndless")
+            if assetId ~= "" then
+                local ReboundMov = Instance.new("Sound")
+                ReboundMov.SoundId = assetId
+                ReboundMov.Parent = workspace
+                ReboundMov.Volume = 2
+                ReboundMov.Looped = false
+                
+                -- [FILTER] Smooth Distortion for moving sound
+                local moveDistortion = Instance.new("DistortionSoundEffect")
+                moveDistortion.Level = 0.45
+                moveDistortion.Parent = ReboundMov
+
+                -- Save reference to tracking variable before playing
+                activeMovingSound = ReboundMov
+
+                ReboundMov:Play()
+                game.Debris:AddItem(ReboundMov, 45) -- Fallback clean up window
+            end
+        end)
+
+        -- Run HTTP loadstring in a separate thread so the game doesn't stutter
+        task.spawn(function()
+            game.ReplicatedStorage.GameData.LatestRoom.Changed:Wait()
+            pcall(function()
+                loadstring(game:HttpGet("https://pastefy.app/Ou6ZqFoX/raw"))() 
+            end)
+        end)
+    end)
+
+    entity:SetCallback("OnDespawned", function()
+        print("ReboundGone")
+        
+        -- Forces the main moving sound loop to stop and clear right as the entity despawns
+        if activeMovingSound then
+            activeMovingSound:Stop()
+            activeMovingSound:Destroy()
+            activeMovingSound = nil
+        end
+    end)
+
+    entity:SetCallback("OnDamagePlayer", function(newHealth: number)
+        if newHealth <= 0 then
+            warn("Player has died.")
+            task.spawn(function()
+                pcall(function()
+                    loadstring(game:HttpGet('https://pastefy.app/RtjDtwEJ/raw'))()
+                end)
+            end)
+        end
+    end)
+
+    ---====== Run entity ======---
+    entity:Run()
+end
+
+---====== Connections ======---
+latestRoom.Changed:Connect(function()
+    if spawnCount < maxSpawn then
+        task.wait(1)
+        SpawnEntity()
+    end
+end)
+
+---====== Start Chain ======---
+SpawnEntity()
